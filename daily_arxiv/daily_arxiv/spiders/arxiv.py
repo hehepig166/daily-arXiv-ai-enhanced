@@ -1,6 +1,7 @@
 import scrapy
 import os
 import re
+import arxiv
 
 
 class ArxivSpider(scrapy.Spider):
@@ -13,6 +14,14 @@ class ArxivSpider(scrapy.Spider):
         self.start_urls = [
             f"https://arxiv.org/list/{cat}/new" for cat in self.target_categories
         ]  # 起始URL（计算机科学领域的最新论文）
+        delay_seconds = float(os.environ.get("ARXIV_API_DELAY_SECONDS", "10"))
+        num_retries = int(os.environ.get("ARXIV_API_NUM_RETRIES", "5"))
+        self.api_batch_size = max(1, int(os.environ.get("ARXIV_API_BATCH_SIZE", "25")))
+        self.client = arxiv.Client(
+            page_size=self.api_batch_size,
+            delay_seconds=delay_seconds,
+            num_retries=num_retries,
+        )
 
     name = "arxiv"  # 爬虫名称
     allowed_domains = ["arxiv.org"]  # 允许爬取的域名
@@ -26,6 +35,7 @@ class ArxivSpider(scrapy.Spider):
                 anchors.append(int(href.split("item")[-1]))
 
         # 遍历每篇论文的详细信息
+        matched_ids = []
         for paper in response.css("dl dt"):
             paper_anchor = paper.css("a[name^='item']::attr(name)").get()
             if not paper_anchor:
@@ -61,17 +71,48 @@ class ArxivSpider(scrapy.Spider):
                 # 检查论文分类是否与目标分类有交集
                 paper_categories = set(categories_in_paper)
                 if paper_categories.intersection(self.target_categories):
-                    yield {
-                        "id": arxiv_id,
-                        "categories": list(paper_categories),  # 添加分类信息用于调试
-                    }
+                    matched_ids.append(arxiv_id)
                     self.logger.info(f"Found paper {arxiv_id} with categories {paper_categories}")
                 else:
                     self.logger.debug(f"Skipped paper {arxiv_id} with categories {paper_categories} (not in target {self.target_categories})")
             else:
                 # 如果无法获取分类信息，记录警告但仍然返回论文（保持向后兼容）
                 self.logger.warning(f"Could not extract categories for paper {arxiv_id}, including anyway")
+                matched_ids.append(arxiv_id)
+
+        yield from self.fetch_metadata(matched_ids)
+
+    def fetch_metadata(self, paper_ids):
+        seen_ids = set()
+        unique_ids = []
+        for paper_id in paper_ids:
+            if paper_id in seen_ids:
+                continue
+            seen_ids.add(paper_id)
+            unique_ids.append(paper_id)
+
+        for i in range(0, len(unique_ids), self.api_batch_size):
+            batch_ids = unique_ids[i:i + self.api_batch_size]
+            search = arxiv.Search(id_list=batch_ids)
+            papers_by_id = {self.normalize_arxiv_id(paper.entry_id.split("/")[-1]): paper for paper in self.client.results(search)}
+
+            for paper_id in batch_ids:
+                paper = papers_by_id.get(paper_id)
+                if paper is None:
+                    self.logger.warning(f"Could not fetch metadata for paper {paper_id}, skipping")
+                    continue
+
                 yield {
-                    "id": arxiv_id,
-                    "categories": [],
+                    "id": paper_id,
+                    "categories": paper.categories,
+                    "pdf": f"https://arxiv.org/pdf/{paper_id}",
+                    "abs": f"https://arxiv.org/abs/{paper_id}",
+                    "authors": [a.name for a in paper.authors],
+                    "title": paper.title,
+                    "comment": paper.comment,
+                    "summary": paper.summary,
                 }
+
+    @staticmethod
+    def normalize_arxiv_id(paper_id):
+        return re.sub(r"v\d+$", "", paper_id)

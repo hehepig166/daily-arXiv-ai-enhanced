@@ -26,98 +26,102 @@ jobs:
       run: |
         source .venv/bin/activate
         today=$(date -u "+%Y-%m-%d")
-        echo "开始爬取 $today 的arXiv论文... / Starting to crawl $today arXiv papers..."
-        
-        # 检查今日文件是否已存在，如存在则删除 / Check if today's file exists, delete if found
-        if [ -f "data/${today}.jsonl" ]; then
-            echo "🗑️ 发现今日文件已存在，正在删除重新生成... / Found existing today's file, deleting for fresh start..."
-            rm "data/${today}.jsonl"
-            echo "✅ 已删除现有文件：data/${today}.jsonl / Deleted existing file: data/${today}.jsonl"
-        else
-            echo "📝 今日文件不存在，准备新建... / Today's file doesn't exist, ready to create new one..."
-        fi
-        
-        cd daily_arxiv
+        echo "开始流式爬取 $today 的arXiv论文... / Starting streaming crawl for $today arXiv papers..."
+
         export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
         export OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }}
         export TOKEN_GITHUB=${{ secrets.TOKEN_GITHUB }}
         export LANGUAGE="${{ vars.LANGUAGE }}"
         export CATEGORIES="${{ vars.CATEGORIES }}"
         export MODEL_NAME="${{ vars.MODEL_NAME }}"
-        
-        # 使用Scrapy爬取
-        # Use Scrapy to crawl
-        scrapy crawl arxiv -o ../data/${today}.jsonl
-        
+        export ARXIV_RUN_DATE="$today"
+        export PYTHONIOENCODING="utf-8"
+        export LANG="${LANG:-C.UTF-8}"
+        export LC_ALL="${LC_ALL:-$LANG}"
+
+        done_file=".tmp/enhancer-${today}.done"
+        rm -f "$done_file"
+        mkdir -p ".tmp"
+
+        python ai/watch_enhance.py \
+          --data "data/${today}.jsonl" \
+          --done-file "$done_file" \
+          --max_workers "${ENHANCE_MAX_WORKERS:-1}" &
+        enhancer_pid=$!
+
+        cleanup_enhancer() {
+          if kill -0 "$enhancer_pid" 2>/dev/null; then
+            touch "$done_file"
+            wait "$enhancer_pid" || true
+          fi
+        }
+        trap cleanup_enhancer EXIT
+
+        # 使用 Scrapy pipeline 逐条持久化 raw 数据，AI worker 并行消费
+        # Use the Scrapy pipeline to persist raw data while the AI worker consumes it
+        cd daily_arxiv
+        set +e
+        scrapy crawl arxiv
+        crawl_exit_code=$?
+        set -e
+        cd ..
+
+        touch "$done_file"
+        set +e
+        wait "$enhancer_pid"
+        enhancer_exit_code=$?
+        set -e
+        trap - EXIT
+
+        if [ "$crawl_exit_code" -ne 0 ]; then
+            echo "爬取失败 / Crawling failed"
+            exit "$crawl_exit_code"
+        fi
+
+        if [ "$enhancer_exit_code" -ne 0 ]; then
+            echo "AI增强队列失败 / AI enhancement queue failed"
+            exit "$enhancer_exit_code"
+        fi
+
         # 检查爬取是否成功 / Check if crawling was successful
-        if [ ! -f "../data/${today}.jsonl" ]; then
-            echo "爬取失败，未生成数据文件 / Crawling failed, no data file generated"
-            exit 1
+        if [ ! -s "data/${today}.jsonl" ] && [ ! -s "data/${today}_AI_enhanced_${LANGUAGE}.jsonl" ]; then
+            echo "未生成新的今日数据文件，可能没有新论文 / No new data file generated, possibly no new papers"
         fi
         
         echo "crawl_date=$today" >> $GITHUB_OUTPUT
-        echo "爬取完成 / Crawling completed"
+        echo "流式爬取完成 / Streaming crawl completed"
         
     - name: Check for duplicates
       id: dedup_check
       run: |
-        source .venv/bin/activate
-        echo "执行去重检查... / Performing intelligent deduplication check..."
-        
-        cd daily_arxiv
-        # 执行去重检查脚本 / Execute intelligent deduplication check script
-        set +e  # 暂时允许命令失败 / Temporarily allow command failure
-        python daily_arxiv/check_stats.py
-        
-        # 获取退出码 / Get exit code
-        dedup_exit_code=$?
-        set -e  # 恢复严格模式 / Restore strict mode
-        
-        echo "去重检查退出码: $dedup_exit_code / Dedup check exit code: $dedup_exit_code"
-        echo "dedup_exit_code=$dedup_exit_code" >> $GITHUB_OUTPUT
-        
-        case $dedup_exit_code in
-            0)
-                echo "has_new_content=true" >> $GITHUB_OUTPUT
-                ;;
-            1)
-                echo "has_new_content=false" >> $GITHUB_OUTPUT
-                echo "skip_reason=no_new_content" >> $GITHUB_OUTPUT
-                ;;
-            2)
-                echo "has_new_content=false" >> $GITHUB_OUTPUT
-                echo "skip_reason=processing_error" >> $GITHUB_OUTPUT
-                exit 1
-                ;;
-            *)
-                echo "❌ 未知退出码，停止工作流 / Unknown exit code, stop workflow"
-                echo "has_new_content=false" >> $GITHUB_OUTPUT
-                echo "skip_reason=unknown_error" >> $GITHUB_OUTPUT
-                exit 1
-                ;;
-        esac
+        today=${{ steps.crawl_step.outputs.crawl_date }}
+        LANGUAGE="${{ vars.LANGUAGE }}"
+        AI_FILE="data/${today}_AI_enhanced_${LANGUAGE}.jsonl"
+
+        if [ -s "$AI_FILE" ]; then
+          echo "has_new_content=true" >> $GITHUB_OUTPUT
+          echo "dedup_exit_code=0" >> $GITHUB_OUTPUT
+          echo "流式去重完成，发现可发布内容 / Streaming dedup completed with publishable content"
+        else
+          echo "has_new_content=false" >> $GITHUB_OUTPUT
+          echo "skip_reason=no_new_content" >> $GITHUB_OUTPUT
+          echo "dedup_exit_code=1" >> $GITHUB_OUTPUT
+          echo "流式去重完成，无新内容 / Streaming dedup completed with no new content"
+        fi
         
     - name: AI Enhancement Processing
       if: steps.dedup_check.outputs.has_new_content == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
-        echo "开始AI增强处理... / Starting AI enhancement processing..."
-        
-        cd ai
-        export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-        export OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }}
-        export LANGUAGE="${{ vars.LANGUAGE }}"
-        export MODEL_NAME="${{ vars.MODEL_NAME }}"
-        
-        python enhance.py --data ../data/${today}.jsonl
-        
-        # 检查AI处理是否成功 / Check if AI processing was successful
-        if [ $? -ne 0 ]; then
-            echo "AI处理失败 / AI processing failed"
+        echo "验证流式AI增强输出... / Validating streaming AI enhancement output..."
+        AI_FILE="data/${today}_AI_enhanced_${{ vars.LANGUAGE }}.jsonl"
+
+        if [ ! -s "$AI_FILE" ]; then
+            echo "AI增强文件为空或不存在 / AI enhanced file is empty or missing"
             exit 1
         fi
-        echo "AI增强处理完成 / AI enhancement processing completed"
+        echo "AI增强输出验证完成 / AI enhancement output validated"
         
     - name: Convert to Markdown
       if: steps.dedup_check.outputs.has_new_content == 'true'

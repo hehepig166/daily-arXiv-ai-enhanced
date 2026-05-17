@@ -165,7 +165,7 @@ async function fetchAvailableDates() {
   try {
     // 读取当前站点下生成的数据文件列表
     const fileListUrl = DATA_CONFIG.getDataUrl('assets/file-list.txt');
-    const response = await fetch(fileListUrl);
+    const response = await fetch(fileListUrl, { cache: 'no-store' });
     if (!response.ok) {
       console.error('Error fetching file list:', response.status);
       return [];
@@ -314,7 +314,7 @@ async function loadPapersByDateRange(startDate, endDate) {
       const selectedLanguage = selectLanguageForDate(date);
       // 从 data 分支获取数据文件
       const dataUrl = DATA_CONFIG.getDataUrl(`data/${date}_AI_enhanced_${selectedLanguage}.jsonl`);
-      const response = await fetch(dataUrl);
+      const response = await fetch(dataUrl, { cache: 'no-store' });
       const text = await response.text();
       const dataPapers = parseJsonlData(text, date);
       

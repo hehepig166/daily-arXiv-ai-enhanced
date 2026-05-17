@@ -1093,7 +1093,7 @@ async function fetchAvailableDates() {
   try {
     // 读取当前站点下生成的数据文件列表
     const fileListUrl = DATA_CONFIG.getDataUrl('assets/file-list.txt');
-    const response = await fetch(fileListUrl);
+    const response = await fetch(fileListUrl, { cache: 'no-store' });
     if (!response.ok) {
       console.error('Error fetching file list:', response.status);
       return [];
@@ -1247,7 +1247,7 @@ async function loadPapersByDate(date) {
   
   try {
     const dataUrl = DATA_CONFIG.getDataUrl(selectDataFileForDate(date));
-    const response = await fetch(dataUrl);
+    const response = await fetch(dataUrl, { cache: 'no-store' });
     // 如果文件不存在（例如返回 404），在论文展示区域提示没有论文
     if (!response.ok) {
       if (response.status === 404) {
@@ -2166,7 +2166,7 @@ async function loadPapersByDateRange(startDate, endDate) {
     
     for (const date of validDatesInRange) {
       const dataUrl = DATA_CONFIG.getDataUrl(selectDataFileForDate(date));
-      const response = await fetch(dataUrl);
+      const response = await fetch(dataUrl, { cache: 'no-store' });
       if (!response.ok) {
         continue;
       }
