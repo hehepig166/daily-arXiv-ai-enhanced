@@ -1,5 +1,7 @@
 # 🚀 daily-arXiv-ai-enhanced
 
+> Looking for setup and deployment instructions? See [Deployment Guide](DEPLOYMENT.md).
+
 > [!CAUTION]
 > 若您所在法域对学术数据有审查要求，谨慎运行本代码；任何二次分发版本必须履行合规审查（包括但不限于原始论文合规性、AI合规性）义务，否则一切法律后果由下游自行承担。
 
