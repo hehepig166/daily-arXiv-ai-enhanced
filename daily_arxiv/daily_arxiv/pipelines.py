@@ -61,6 +61,10 @@ class StreamingRawPipeline:
         self.raw_ids = self._load_ids(self.raw_file)
 
         self.raw_handle = None
+        self.written_count = 0
+        self.history_skip_count = 0
+        self.existing_skip_count = 0
+        self.invalid_count = 0
 
     def open_spider(self, spider):
         self.raw_handle = open(self.raw_file, "a", encoding="utf-8")
@@ -75,20 +79,31 @@ class StreamingRawPipeline:
     def close_spider(self, spider):
         if self.raw_handle:
             self.raw_handle.close()
+        spider.logger.info(
+            "Raw queue summary: written=%d, skipped_existing=%d, skipped_history=%d, invalid=%d",
+            self.written_count,
+            self.existing_skip_count,
+            self.history_skip_count,
+            self.invalid_count,
+        )
 
     def process_item(self, item: dict, spider):
         paper_id = item.get("id")
         if not paper_id:
+            self.invalid_count += 1
             raise DropItem("Skipping item without id")
 
         if paper_id in self.history_ids:
+            self.history_skip_count += 1
             raise DropItem(f"Skipping historical duplicate paper {paper_id}")
 
         if paper_id in self.raw_ids:
+            self.existing_skip_count += 1
             raise DropItem(f"Skipping already persisted paper {paper_id}")
 
         self._append_jsonl(self.raw_handle, item)
         self.raw_ids.add(paper_id)
+        self.written_count += 1
         self._update_file_list()
         return item
 

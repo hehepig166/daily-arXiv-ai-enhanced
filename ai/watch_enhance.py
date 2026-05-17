@@ -95,9 +95,13 @@ def main():
 
     completed_ids = load_ids(target_file)
     history_ids = load_history_ids(raw_file, language, args.history_days)
+    initial_completed_count = len(completed_ids)
     in_progress_ids = set()
     submitted_ids = set()
     futures = {}
+    success_count = 0
+    filtered_count = 0
+    failed_count = 0
 
     print(f"Watching raw data: {raw_file}", file=sys.stderr)
     print(f"Writing enhanced data: {target_file}", file=sys.stderr)
@@ -139,16 +143,19 @@ def main():
                 try:
                     result = future.result()
                 except Exception as e:
+                    failed_count += 1
                     print(f"Enhancement failed for {paper_id}: {e}", file=sys.stderr)
                     continue
 
                 if result is None:
+                    filtered_count += 1
                     print(f"Skipping filtered paper {paper_id}", file=sys.stderr)
                     completed_ids.add(paper_id)
                     continue
 
                 append_jsonl(target_file, result)
                 completed_ids.add(paper_id)
+                success_count += 1
                 update_file_list(raw_file.parent)
                 print(f"Enhanced {paper_id}", file=sys.stderr)
 
@@ -160,6 +167,12 @@ def main():
 
     update_file_list(raw_file.parent)
     print("Enhancer queue drained", file=sys.stderr)
+    print(
+        "AI enhancement summary: "
+        f"success={success_count}, filtered={filtered_count}, failed={failed_count}, "
+        f"already_completed={initial_completed_count}, submitted={len(submitted_ids)}",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

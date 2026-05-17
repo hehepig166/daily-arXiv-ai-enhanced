@@ -13,6 +13,7 @@ ai/.env
 test/*
 .idea/
 .cursorrules
+.tmp/
 node_modules/
 package-lock.json
 yarn.lock
