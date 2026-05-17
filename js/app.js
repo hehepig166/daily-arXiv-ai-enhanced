@@ -22,6 +22,7 @@ let annotations = {}; // paper id -> { read: [], favorite: [] }
 let annotationsAvailable = true;
 let currentAnnotationName = '';
 let annotationFilter = 'all';
+let interestsAvailable = true;
 
 function getEffectiveAnnotationName() {
   const trimmed = currentAnnotationName.trim();
@@ -193,119 +194,182 @@ async function togglePaperAnnotation(paper, type) {
   }
 }
 
-// 加载用户的关键词设置
-function loadUserKeywords() {
-  const savedKeywords = localStorage.getItem('preferredKeywords');
-  if (savedKeywords) {
-    try {
-      userKeywords = JSON.parse(savedKeywords);
-      // 默认激活所有关键词
-      activeKeywords = [...userKeywords];
-    } catch (error) {
-      console.error('解析关键词失败:', error);
-      userKeywords = [];
-      activeKeywords = [];
+function normalizeInterestList(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const result = [];
+  const seen = new Set();
+  items.forEach(item => {
+    if (typeof item !== 'string') {
+      return;
     }
-  } else {
+    const normalized = item.trim();
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(normalized);
+  });
+  return result;
+}
+
+async function fetchSharedInterests() {
+  try {
+    const response = await fetch('/api/interests');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    userKeywords = normalizeInterestList(data.keywords);
+    activeKeywords = [...userKeywords];
+    userAuthors = normalizeInterestList(data.authors);
+    activeAuthors = [...userAuthors];
+    interestsAvailable = true;
+  } catch (error) {
+    console.warn('Shared interests API unavailable:', error);
     userKeywords = [];
     activeKeywords = [];
+    userAuthors = [];
+    activeAuthors = [];
+    interestsAvailable = false;
   }
-  
-  // renderKeywordTags();
+
   renderFilterTags();
 }
 
-// 加载用户的作者设置
-function loadUserAuthors() {
-  const savedAuthors = localStorage.getItem('preferredAuthors');
-  if (savedAuthors) {
-    try {
-      userAuthors = JSON.parse(savedAuthors);
-      // 默认激活所有作者
-      activeAuthors = [...userAuthors];
-    } catch (error) {
-      console.error('解析作者失败:', error);
-      userAuthors = [];
-      activeAuthors = [];
-    }
-  } else {
-    userAuthors = [];
-    activeAuthors = [];
+function formatFilterSummaryPart(count, total, singular) {
+  if (total === 0) {
+    return null;
   }
-  
-  renderFilterTags();
+
+  const label = count === 1 ? singular : `${singular}s`;
+  return `${count}/${total} ${label}`;
+}
+
+function updateFilterSummary() {
+  const summaryElement = document.getElementById('filterSummary');
+  const toggleButton = document.getElementById('filterPanelToggle');
+  if (!summaryElement || !toggleButton) {
+    return;
+  }
+
+  const totalInterests = userAuthors.length + userKeywords.length;
+  if (!interestsAvailable) {
+    summaryElement.textContent = 'Shared interests unavailable';
+    toggleButton.disabled = true;
+    return;
+  }
+
+  toggleButton.disabled = totalInterests === 0;
+  if (totalInterests === 0) {
+    summaryElement.textContent = 'No interests';
+    return;
+  }
+
+  const parts = [
+    formatFilterSummaryPart(activeAuthors.length, userAuthors.length, 'author'),
+    formatFilterSummaryPart(activeKeywords.length, userKeywords.length, 'keyword'),
+  ].filter(Boolean);
+  summaryElement.textContent = `${parts.join(', ')} active`;
+}
+
+function createInterestFilterChip(value, type) {
+  const tagElement = document.createElement('button');
+  const isAuthor = type === 'author';
+  const activeList = isAuthor ? activeAuthors : activeKeywords;
+  tagElement.type = 'button';
+  tagElement.className = `category-button ${isAuthor ? 'author-button' : 'keyword-button'} ${activeList.includes(value) ? 'active' : ''}`;
+  tagElement.textContent = value;
+  tagElement.dataset[type] = value;
+  tagElement.title = isAuthor ? 'Match author name' : 'Match keywords in title and summary';
+  tagElement.addEventListener('click', () => {
+    if (isAuthor) {
+      toggleAuthorFilter(value);
+    } else {
+      toggleKeywordFilter(value);
+    }
+  });
+  return tagElement;
+}
+
+function renderFilterGroup(container, section, values, type) {
+  if (!container || !section) {
+    return;
+  }
+
+  section.hidden = values.length === 0;
+  container.innerHTML = '';
+  if (values.length === 0) {
+    return;
+  }
+
+  values.forEach(value => {
+    container.appendChild(createInterestFilterChip(value, type));
+  });
 }
 
 // 渲染过滤标签（作者和关键词）
 function renderFilterTags() {
-  const filterTagsElement = document.getElementById('filterTags');
+  const authorTagsElement = document.getElementById('authorFilterTags');
+  const keywordTagsElement = document.getElementById('keywordFilterTags');
+  const authorSection = document.getElementById('authorFilterSection');
+  const keywordSection = document.getElementById('keywordFilterSection');
+  const filterPanel = document.getElementById('filterPanel');
   const filterContainer = document.querySelector('.filter-label-container');
+
+  if (!authorTagsElement || !keywordTagsElement || !filterContainer) {
+    return;
+  }
+
+  if (!interestsAvailable) {
+    filterContainer.style.display = 'flex';
+    authorTagsElement.innerHTML = '<span class="category-button disabled-interest-tag" title="Start the site with python serve_local.py">Shared interests unavailable</span>';
+    keywordTagsElement.innerHTML = '';
+    if (authorSection) {
+      authorSection.hidden = false;
+    }
+    if (keywordSection) {
+      keywordSection.hidden = true;
+    }
+    if (filterPanel) {
+      filterPanel.hidden = false;
+    }
+    updateFilterSummary();
+    return;
+  }
   
-  // 如果没有作者和关键词，仅隐藏标签区域，保留容器（以显示搜索按钮）
+  // 如果没有作者和关键词，仅保留紧凑行（以显示搜索按钮和标记筛选）
   if ((!userAuthors || userAuthors.length === 0) && (!userKeywords || userKeywords.length === 0)) {
     filterContainer.style.display = 'flex';
-    if (filterTagsElement) {
-      filterTagsElement.style.display = 'none';
-      filterTagsElement.innerHTML = '';
+    authorTagsElement.innerHTML = '';
+    keywordTagsElement.innerHTML = '';
+    if (filterPanel) {
+      filterPanel.hidden = true;
     }
+    updateFilterSummary();
     return;
   }
   
   filterContainer.style.display = 'flex';
-  if (filterTagsElement) {
-    filterTagsElement.style.display = 'flex';
+  renderFilterGroup(authorTagsElement, authorSection, userAuthors || [], 'author');
+  renderFilterGroup(keywordTagsElement, keywordSection, userKeywords || [], 'keyword');
+  updateFilterSummary();
+}
+
+function setInterestFilterGroup(type, enabled) {
+  if (type === 'authors') {
+    activeAuthors = enabled ? [...userAuthors] : [];
+  } else if (type === 'keywords') {
+    activeKeywords = enabled ? [...userKeywords] : [];
   }
-  filterTagsElement.innerHTML = '';
-  
-  // 先添加作者标签
-  if (userAuthors && userAuthors.length > 0) {
-    userAuthors.forEach(author => {
-      const tagElement = document.createElement('span');
-      tagElement.className = `category-button author-button ${activeAuthors.includes(author) ? 'active' : ''}`;
-      tagElement.textContent = author;
-      tagElement.dataset.author = author;
-      tagElement.title = "Match author name";
-      
-      tagElement.addEventListener('click', () => {
-        toggleAuthorFilter(author);
-      });
-      
-      filterTagsElement.appendChild(tagElement);
-      
-      // 添加出现动画后移除动画类
-      if (!activeAuthors.includes(author)) {
-        tagElement.classList.add('tag-appear');
-        setTimeout(() => {
-          tagElement.classList.remove('tag-appear');
-        }, 300);
-      }
-    });
-  }
-  
-  // 再添加关键词标签
-  if (userKeywords && userKeywords.length > 0) {
-    userKeywords.forEach(keyword => {
-      const tagElement = document.createElement('span');
-      tagElement.className = `category-button keyword-button ${activeKeywords.includes(keyword) ? 'active' : ''}`;
-      tagElement.textContent = keyword;
-      tagElement.dataset.keyword = keyword;
-      tagElement.title = "Match keywords in title and summary";
-      
-      tagElement.addEventListener('click', () => {
-        toggleKeywordFilter(keyword);
-      });
-      
-      filterTagsElement.appendChild(tagElement);
-      
-      // 添加出现动画后移除动画类
-      if (!activeKeywords.includes(keyword)) {
-        tagElement.classList.add('tag-appear');
-        setTimeout(() => {
-          tagElement.classList.remove('tag-appear');
-        }, 300);
-      }
-    });
-  }
+  renderFilterTags();
+  renderPapers();
 }
 
 // 切换关键词过滤
@@ -341,6 +405,8 @@ function toggleKeywordFilter(keyword) {
       }, 1000);
     }
   });
+
+  updateFilterSummary();
   
   // 重新渲染论文列表
   renderPapers();
@@ -380,6 +446,8 @@ function toggleAuthorFilter(author) {
       }, 1000);
     }
   });
+
+  updateFilterSummary();
   
   // 重新渲染论文列表
   renderPapers();
@@ -547,19 +615,13 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchGitHubStats();
   loadAnnotationName();
 
-  // 加载用户关键词
-  loadUserKeywords();
-
-  // 加载用户作者
-  loadUserAuthors();
-
   // 解析URL中的category、json、author和keywords参数
   urlCategoryParam = getUrlCategory();
   urlJsonParam = getJsonParam();
   urlAuthorParam = getUrlAuthor();
   urlKeywordsParam = getUrlKeywords();
 
-  Promise.all([fetchAnnotations(), fetchAvailableDates()]).then(() => {
+  Promise.all([fetchAnnotations(), fetchSharedInterests(), fetchAvailableDates()]).then(() => {
     if (availableDates.length > 0) {
       loadPapersByDate(availableDates[0]);
     } else {
@@ -603,6 +665,34 @@ async function fetchGitHubStats() {
   }
 }
 
+function openEasterEgg() {
+  const modal = document.getElementById('easterEggModal');
+  const image = document.getElementById('easterEggImage');
+  const message = document.getElementById('easterEggMessage');
+  if (!modal || !image || !message) {
+    return;
+  }
+
+  message.hidden = true;
+  image.hidden = false;
+  image.removeAttribute('src');
+  image.src = `/api/easter-egg?t=${Date.now()}`;
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeEasterEgg() {
+  const modal = document.getElementById('easterEggModal');
+  const image = document.getElementById('easterEggImage');
+  if (!modal || !image) {
+    return;
+  }
+
+  modal.classList.remove('active');
+  modal.setAttribute('aria-hidden', 'true');
+  image.removeAttribute('src');
+}
+
 function initEventListeners() {
   // 日期选择器相关的事件监听
   const calendarButton = document.getElementById('calendarButton');
@@ -621,6 +711,36 @@ function initEventListeners() {
   const datePickerContent = document.querySelector('.date-picker-content');
   datePickerContent.addEventListener('click', (e) => {
     e.stopPropagation();
+  });
+
+  const easterEggButton = document.getElementById('easterEggButton');
+  const easterEggModal = document.getElementById('easterEggModal');
+  const easterEggClose = document.getElementById('easterEggClose');
+  const easterEggImage = document.getElementById('easterEggImage');
+  const easterEggMessage = document.getElementById('easterEggMessage');
+  if (easterEggButton) {
+    easterEggButton.addEventListener('click', openEasterEgg);
+  }
+  if (easterEggClose) {
+    easterEggClose.addEventListener('click', closeEasterEgg);
+  }
+  if (easterEggModal) {
+    easterEggModal.addEventListener('click', (event) => {
+      if (event.target === easterEggModal) {
+        closeEasterEgg();
+      }
+    });
+  }
+  if (easterEggImage && easterEggMessage) {
+    easterEggImage.addEventListener('error', () => {
+      easterEggImage.hidden = true;
+      easterEggMessage.hidden = false;
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeEasterEgg();
+    }
   });
 
   document.getElementById('dateRangeMode').addEventListener('change', toggleRangeMode);
@@ -874,6 +994,35 @@ function initEventListeners() {
       renderPapers();
     });
   }
+
+  const filterPanelToggle = document.getElementById('filterPanelToggle');
+  const filterPanel = document.getElementById('filterPanel');
+  if (filterPanelToggle && filterPanel) {
+    filterPanelToggle.addEventListener('click', () => {
+      if (filterPanelToggle.disabled) {
+        return;
+      }
+
+      const nextExpanded = filterPanel.hidden;
+      filterPanel.hidden = !nextExpanded;
+      filterPanelToggle.setAttribute('aria-expanded', String(nextExpanded));
+    });
+  }
+
+  document.querySelectorAll('[data-filter-action]').forEach(button => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.filterAction;
+      if (action === 'authors-all') {
+        setInterestFilterGroup('authors', true);
+      } else if (action === 'authors-clear') {
+        setInterestFilterGroup('authors', false);
+      } else if (action === 'keywords-all') {
+        setInterestFilterGroup('keywords', true);
+      } else if (action === 'keywords-clear') {
+        setInterestFilterGroup('keywords', false);
+      }
+    });
+  });
 
   const annotationNameInput = document.getElementById('annotationNameInput');
   if (annotationNameInput) {

@@ -218,14 +218,17 @@ header {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
+  border: none;
   border-radius: 24px;
   background: var(--gradient-primary);
   color: white;
   font-size: 14px;
   font-weight: 500;
+  font-family: inherit;
   transition: var(--transition);
   text-decoration: none !important;
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 
 .github-button:hover {
@@ -275,6 +278,68 @@ header {
 .fork-count {
   color: white;
   font-weight: 600;
+}
+
+.easter-egg-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.easter-egg-modal.active {
+  display: flex;
+}
+
+.easter-egg-content {
+  max-width: min(90vw, 900px);
+  max-height: min(86vh, 720px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.easter-egg-content img {
+  max-width: 100%;
+  max-height: min(86vh, 720px);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  background-color: var(--card-bg-color);
+}
+
+.easter-egg-close {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.16);
+  color: white;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.easter-egg-close:hover {
+  background-color: rgba(255, 255, 255, 0.26);
+  transform: translateY(-1px);
+}
+
+.easter-egg-message {
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  background-color: var(--card-bg-color);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
 }
 
 .header-controls {
@@ -407,6 +472,14 @@ header {
   overflow-y: hidden;
 }
 
+.filter-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
 /* Text search UI */
 .text-search {
   display: inline-flex;
@@ -474,12 +547,119 @@ header {
 
 .filter-label-container {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   max-width: 1440px; /* 与main容器的max-width相同 */
   width: 100%;
   padding: 10px 24px 5px 24px; /* 与category标签容器保持一致 */
   margin: 0 auto; /* 居中显示 */
   position: relative;
+}
+
+.filter-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-accent);
+  border-radius: 999px;
+  background-color: var(--background-hover);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.filter-panel-toggle:hover:not(:disabled),
+.filter-panel-toggle[aria-expanded="true"] {
+  border-color: var(--primary-color);
+  color: var(--text-color);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12);
+}
+
+.filter-panel-toggle:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.filter-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: transform 0.2s ease;
+}
+
+.filter-panel-toggle[aria-expanded="true"] .filter-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.filter-panel {
+  width: calc(100% - 98px);
+  margin: 8px 0 4px 98px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--shadow-sm);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.filter-panel[hidden] {
+  display: none;
+}
+
+.filter-panel-section + .filter-panel-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.filter-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.filter-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-action-button {
+  padding: 3px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: 999px;
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.filter-action-button:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background-color: rgba(102, 126, 234, 0.06);
+}
+
+.filter-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
 }
 
 .category-button {
@@ -583,6 +763,12 @@ header {
   color: white;
   border-color: var(--accent-color);
   box-shadow: 0 2px 8px rgba(167, 139, 250, 0.25);
+}
+
+.disabled-interest-tag {
+  cursor: default;
+  opacity: 0.65;
+  border: 1px dashed var(--border-accent);
 }
 
 .keyword-tag.active {
@@ -1388,6 +1574,47 @@ input:checked + .toggle-slider:before {
     justify-content: flex-start; /* 在移动端左对齐 */
     flex-wrap: nowrap; /* 确保不换行 */
   }
+
+  .filter-label-container {
+    padding: 8px 16px;
+  }
+
+  .filter-compact-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .filter-nav-label {
+    min-width: auto;
+    margin-right: 4px;
+  }
+
+  .annotation-filter-select,
+  .filter-panel-toggle {
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 160px;
+  }
+
+  .text-search {
+    margin-right: 0;
+  }
+
+  #textSearchInput {
+    width: 160px;
+  }
+
+  .filter-panel {
+    width: 100%;
+    margin: 8px 0 0;
+    max-height: 260px;
+  }
+
+  .filter-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
   
   .category-button, .keyword-tag {
     padding: 4px 10px;
@@ -1820,9 +2047,6 @@ footer {
   margin-left: 4px;
   letter-spacing: 0;
   text-transform: none;
-}
-
-  padding-left: 3px; /* 减少左侧内边距 */
 }
 
 
@@ -2429,10 +2653,6 @@ footer {
   /* background-color: #fff8c5;  Removed yellow background */
   border-color: rgba(27, 31, 36, 0.15);
   color: #24292f;
-}
-
-.github-link.outdated-repo {
-  /* opacity: 0.7; Removed opacity */
 }
 
 .github-stars {
