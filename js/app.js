@@ -243,83 +243,133 @@ async function fetchSharedInterests() {
   renderFilterTags();
 }
 
+function formatFilterSummaryPart(count, total, singular) {
+  if (total === 0) {
+    return null;
+  }
+
+  const label = count === 1 ? singular : `${singular}s`;
+  return `${count}/${total} ${label}`;
+}
+
+function updateFilterSummary() {
+  const summaryElement = document.getElementById('filterSummary');
+  const toggleButton = document.getElementById('filterPanelToggle');
+  if (!summaryElement || !toggleButton) {
+    return;
+  }
+
+  const totalInterests = userAuthors.length + userKeywords.length;
+  if (!interestsAvailable) {
+    summaryElement.textContent = 'Shared interests unavailable';
+    toggleButton.disabled = true;
+    return;
+  }
+
+  toggleButton.disabled = totalInterests === 0;
+  if (totalInterests === 0) {
+    summaryElement.textContent = 'No interests';
+    return;
+  }
+
+  const parts = [
+    formatFilterSummaryPart(activeAuthors.length, userAuthors.length, 'author'),
+    formatFilterSummaryPart(activeKeywords.length, userKeywords.length, 'keyword'),
+  ].filter(Boolean);
+  summaryElement.textContent = `${parts.join(', ')} active`;
+}
+
+function createInterestFilterChip(value, type) {
+  const tagElement = document.createElement('button');
+  const isAuthor = type === 'author';
+  const activeList = isAuthor ? activeAuthors : activeKeywords;
+  tagElement.type = 'button';
+  tagElement.className = `category-button ${isAuthor ? 'author-button' : 'keyword-button'} ${activeList.includes(value) ? 'active' : ''}`;
+  tagElement.textContent = value;
+  tagElement.dataset[type] = value;
+  tagElement.title = isAuthor ? 'Match author name' : 'Match keywords in title and summary';
+  tagElement.addEventListener('click', () => {
+    if (isAuthor) {
+      toggleAuthorFilter(value);
+    } else {
+      toggleKeywordFilter(value);
+    }
+  });
+  return tagElement;
+}
+
+function renderFilterGroup(container, section, values, type) {
+  if (!container || !section) {
+    return;
+  }
+
+  section.hidden = values.length === 0;
+  container.innerHTML = '';
+  if (values.length === 0) {
+    return;
+  }
+
+  values.forEach(value => {
+    container.appendChild(createInterestFilterChip(value, type));
+  });
+}
+
 // 渲染过滤标签（作者和关键词）
 function renderFilterTags() {
-  const filterTagsElement = document.getElementById('filterTags');
+  const authorTagsElement = document.getElementById('authorFilterTags');
+  const keywordTagsElement = document.getElementById('keywordFilterTags');
+  const authorSection = document.getElementById('authorFilterSection');
+  const keywordSection = document.getElementById('keywordFilterSection');
+  const filterPanel = document.getElementById('filterPanel');
   const filterContainer = document.querySelector('.filter-label-container');
 
-  if (!filterTagsElement || !filterContainer) {
+  if (!authorTagsElement || !keywordTagsElement || !filterContainer) {
     return;
   }
 
   if (!interestsAvailable) {
     filterContainer.style.display = 'flex';
-    filterTagsElement.style.display = 'flex';
-    filterTagsElement.innerHTML = '<span class="category-button disabled-interest-tag" title="Start the site with python serve_local.py">Shared interests unavailable</span>';
+    authorTagsElement.innerHTML = '<span class="category-button disabled-interest-tag" title="Start the site with python serve_local.py">Shared interests unavailable</span>';
+    keywordTagsElement.innerHTML = '';
+    if (authorSection) {
+      authorSection.hidden = false;
+    }
+    if (keywordSection) {
+      keywordSection.hidden = true;
+    }
+    if (filterPanel) {
+      filterPanel.hidden = false;
+    }
+    updateFilterSummary();
     return;
   }
   
-  // 如果没有作者和关键词，仅隐藏标签区域，保留容器（以显示搜索按钮）
+  // 如果没有作者和关键词，仅保留紧凑行（以显示搜索按钮和标记筛选）
   if ((!userAuthors || userAuthors.length === 0) && (!userKeywords || userKeywords.length === 0)) {
     filterContainer.style.display = 'flex';
-    filterTagsElement.style.display = 'none';
-    filterTagsElement.innerHTML = '';
+    authorTagsElement.innerHTML = '';
+    keywordTagsElement.innerHTML = '';
+    if (filterPanel) {
+      filterPanel.hidden = true;
+    }
+    updateFilterSummary();
     return;
   }
   
   filterContainer.style.display = 'flex';
-  filterTagsElement.style.display = 'flex';
-  filterTagsElement.innerHTML = '';
-  
-  // 先添加作者标签
-  if (userAuthors && userAuthors.length > 0) {
-    userAuthors.forEach(author => {
-      const tagElement = document.createElement('span');
-      tagElement.className = `category-button author-button ${activeAuthors.includes(author) ? 'active' : ''}`;
-      tagElement.textContent = author;
-      tagElement.dataset.author = author;
-      tagElement.title = "Match author name";
-      
-      tagElement.addEventListener('click', () => {
-        toggleAuthorFilter(author);
-      });
-      
-      filterTagsElement.appendChild(tagElement);
-      
-      // 添加出现动画后移除动画类
-      if (!activeAuthors.includes(author)) {
-        tagElement.classList.add('tag-appear');
-        setTimeout(() => {
-          tagElement.classList.remove('tag-appear');
-        }, 300);
-      }
-    });
+  renderFilterGroup(authorTagsElement, authorSection, userAuthors || [], 'author');
+  renderFilterGroup(keywordTagsElement, keywordSection, userKeywords || [], 'keyword');
+  updateFilterSummary();
+}
+
+function setInterestFilterGroup(type, enabled) {
+  if (type === 'authors') {
+    activeAuthors = enabled ? [...userAuthors] : [];
+  } else if (type === 'keywords') {
+    activeKeywords = enabled ? [...userKeywords] : [];
   }
-  
-  // 再添加关键词标签
-  if (userKeywords && userKeywords.length > 0) {
-    userKeywords.forEach(keyword => {
-      const tagElement = document.createElement('span');
-      tagElement.className = `category-button keyword-button ${activeKeywords.includes(keyword) ? 'active' : ''}`;
-      tagElement.textContent = keyword;
-      tagElement.dataset.keyword = keyword;
-      tagElement.title = "Match keywords in title and summary";
-      
-      tagElement.addEventListener('click', () => {
-        toggleKeywordFilter(keyword);
-      });
-      
-      filterTagsElement.appendChild(tagElement);
-      
-      // 添加出现动画后移除动画类
-      if (!activeKeywords.includes(keyword)) {
-        tagElement.classList.add('tag-appear');
-        setTimeout(() => {
-          tagElement.classList.remove('tag-appear');
-        }, 300);
-      }
-    });
-  }
+  renderFilterTags();
+  renderPapers();
 }
 
 // 切换关键词过滤
@@ -355,6 +405,8 @@ function toggleKeywordFilter(keyword) {
       }, 1000);
     }
   });
+
+  updateFilterSummary();
   
   // 重新渲染论文列表
   renderPapers();
@@ -394,6 +446,8 @@ function toggleAuthorFilter(author) {
       }, 1000);
     }
   });
+
+  updateFilterSummary();
   
   // 重新渲染论文列表
   renderPapers();
@@ -882,6 +936,35 @@ function initEventListeners() {
       renderPapers();
     });
   }
+
+  const filterPanelToggle = document.getElementById('filterPanelToggle');
+  const filterPanel = document.getElementById('filterPanel');
+  if (filterPanelToggle && filterPanel) {
+    filterPanelToggle.addEventListener('click', () => {
+      if (filterPanelToggle.disabled) {
+        return;
+      }
+
+      const nextExpanded = filterPanel.hidden;
+      filterPanel.hidden = !nextExpanded;
+      filterPanelToggle.setAttribute('aria-expanded', String(nextExpanded));
+    });
+  }
+
+  document.querySelectorAll('[data-filter-action]').forEach(button => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.filterAction;
+      if (action === 'authors-all') {
+        setInterestFilterGroup('authors', true);
+      } else if (action === 'authors-clear') {
+        setInterestFilterGroup('authors', false);
+      } else if (action === 'keywords-all') {
+        setInterestFilterGroup('keywords', true);
+      } else if (action === 'keywords-clear') {
+        setInterestFilterGroup('keywords', false);
+      }
+    });
+  });
 
   const annotationNameInput = document.getElementById('annotationNameInput');
   if (annotationNameInput) {

@@ -137,24 +137,53 @@
                 </div>
                 <!-- Filter Tag Container -->
                 <div class="filter-label-container">
-                    <span class="filter-nav-label">Filter</span>
-                    <!-- Text Search (magnifier-triggered) -->
-                    <div id="textSearchContainer" class="text-search">
-                        <button id="textSearchToggle" class="icon-button" title="Search">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M10.5 3a7.5 7.5 0 105.07 13.07l3.68 3.68a1 1 0 001.41-1.41l-3.68-3.68A7.5 7.5 0 0010.5 3zm0 2a5.5 5.5 0 110 11 5.5 5.5 0 010-11z" fill="currentColor"/>
-                            </svg>
-                        </button>
-                        <div class="search-input-wrapper" style="display: none;">
-                            <input id="textSearchInput" type="text" placeholder="Type to search..." aria-label="Search" />
-                            <button id="textSearchClear" class="clear-x" title="Clear" style="display: none;">×</button>
+                    <div class="filter-compact-row">
+                        <span class="filter-nav-label">Filter</span>
+                        <!-- Text Search (magnifier-triggered) -->
+                        <div id="textSearchContainer" class="text-search">
+                            <button id="textSearchToggle" class="icon-button" title="Search">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M10.5 3a7.5 7.5 0 105.07 13.07l3.68 3.68a1 1 0 001.41-1.41l-3.68-3.68A7.5 7.5 0 0010.5 3zm0 2a5.5 5.5 0 110 11 5.5 5.5 0 010-11z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                            <div class="search-input-wrapper" style="display: none;">
+                                <input id="textSearchInput" type="text" placeholder="Type to search..." aria-label="Search" />
+                                <button id="textSearchClear" class="clear-x" title="Clear" style="display: none;">×</button>
+                            </div>
                         </div>
+                        <select id="annotationFilterSelect" class="annotation-filter-select" aria-label="Annotation filter">
+                            <option value="all">All marks</option>
+                        </select>
+                        <button id="filterPanelToggle" class="filter-panel-toggle" aria-expanded="false" aria-controls="filterPanel">
+                            <span id="filterSummary">No interests</span>
+                            <span class="filter-toggle-icon" aria-hidden="true">▾</span>
+                        </button>
                     </div>
-                    <select id="annotationFilterSelect" class="annotation-filter-select" aria-label="Annotation filter">
-                        <option value="all">All marks</option>
-                    </select>
-                    <div class="filter-scroll" id="filterTags">
-                        <!-- Authors and Keywords will be dynamically added here -->
+                    <div id="filterPanel" class="filter-panel" hidden>
+                        <div class="filter-panel-section" id="authorFilterSection">
+                            <div class="filter-panel-header">
+                                <span>Authors</span>
+                                <div class="filter-panel-actions">
+                                    <button type="button" class="filter-action-button" data-filter-action="authors-all">All</button>
+                                    <button type="button" class="filter-action-button" data-filter-action="authors-clear">Clear</button>
+                                </div>
+                            </div>
+                            <div class="filter-chip-list" id="authorFilterTags">
+                                <!-- Author filters will be dynamically added here -->
+                            </div>
+                        </div>
+                        <div class="filter-panel-section" id="keywordFilterSection">
+                            <div class="filter-panel-header">
+                                <span>Keywords</span>
+                                <div class="filter-panel-actions">
+                                    <button type="button" class="filter-action-button" data-filter-action="keywords-all">All</button>
+                                    <button type="button" class="filter-action-button" data-filter-action="keywords-clear">Clear</button>
+                                </div>
+                            </div>
+                            <div class="filter-chip-list" id="keywordFilterTags">
+                                <!-- Keyword filters will be dynamically added here -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
