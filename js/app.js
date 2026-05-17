@@ -665,6 +665,34 @@ async function fetchGitHubStats() {
   }
 }
 
+function openEasterEgg() {
+  const modal = document.getElementById('easterEggModal');
+  const image = document.getElementById('easterEggImage');
+  const message = document.getElementById('easterEggMessage');
+  if (!modal || !image || !message) {
+    return;
+  }
+
+  message.hidden = true;
+  image.hidden = false;
+  image.removeAttribute('src');
+  image.src = `/api/easter-egg?t=${Date.now()}`;
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeEasterEgg() {
+  const modal = document.getElementById('easterEggModal');
+  const image = document.getElementById('easterEggImage');
+  if (!modal || !image) {
+    return;
+  }
+
+  modal.classList.remove('active');
+  modal.setAttribute('aria-hidden', 'true');
+  image.removeAttribute('src');
+}
+
 function initEventListeners() {
   // 日期选择器相关的事件监听
   const calendarButton = document.getElementById('calendarButton');
@@ -683,6 +711,36 @@ function initEventListeners() {
   const datePickerContent = document.querySelector('.date-picker-content');
   datePickerContent.addEventListener('click', (e) => {
     e.stopPropagation();
+  });
+
+  const easterEggButton = document.getElementById('easterEggButton');
+  const easterEggModal = document.getElementById('easterEggModal');
+  const easterEggClose = document.getElementById('easterEggClose');
+  const easterEggImage = document.getElementById('easterEggImage');
+  const easterEggMessage = document.getElementById('easterEggMessage');
+  if (easterEggButton) {
+    easterEggButton.addEventListener('click', openEasterEgg);
+  }
+  if (easterEggClose) {
+    easterEggClose.addEventListener('click', closeEasterEgg);
+  }
+  if (easterEggModal) {
+    easterEggModal.addEventListener('click', (event) => {
+      if (event.target === easterEggModal) {
+        closeEasterEgg();
+      }
+    });
+  }
+  if (easterEggImage && easterEggMessage) {
+    easterEggImage.addEventListener('error', () => {
+      easterEggImage.hidden = true;
+      easterEggMessage.hidden = false;
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeEasterEgg();
+    }
   });
 
   document.getElementById('dateRangeMode').addEventListener('change', toggleRangeMode);

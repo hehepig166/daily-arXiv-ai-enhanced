@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
+import random
 import socket
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +20,7 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
 
     annotations_lock = Lock()
     interests_lock = Lock()
+    easter_egg_extensions = {".gif", ".jpg", ".jpeg", ".png", ".webp"}
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
@@ -30,6 +33,9 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/interests":
             self.send_json(self.read_interests())
+            return
+        if path == "/api/easter-egg":
+            self.send_random_easter_egg()
             return
 
         super().do_GET()
@@ -57,6 +63,40 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_empty_response(self, status: int) -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def send_random_easter_egg(self) -> None:
+        image_dir = Path("images/easter-egg")
+        if not image_dir.is_dir():
+            self.send_empty_response(404)
+            return
+
+        image_paths = [
+            path
+            for path in image_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in self.easter_egg_extensions
+        ]
+        if not image_paths:
+            self.send_empty_response(404)
+            return
+
+        image_path = random.choice(image_paths)
+        try:
+            body = image_path.read_bytes()
+        except OSError:
+            self.send_empty_response(404)
+            return
+
+        content_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
