@@ -1,34 +1,80 @@
+let sharedInterests = {
+  keywords: [],
+  authors: [],
+};
+let interestsAvailable = true;
+
 document.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initEventListeners();
   fetchGitHubStats();
 });
 
-// 初始化设置，从localStorage加载已保存的设置
-function initSettings() {
-  // 关键词偏好设置
-  loadKeywordPreferences();
-  // 作者偏好设置
-  loadAuthorPreferences();
+function normalizeInterestList(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const result = [];
+  const seen = new Set();
+  items.forEach(item => {
+    if (typeof item !== 'string') {
+      return;
+    }
+    const normalized = item.trim();
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(normalized);
+  });
+  return result;
 }
 
-// 从localStorage加载关键词偏好
-function loadKeywordPreferences() {
+function normalizeInterests(interests) {
+  return {
+    keywords: normalizeInterestList(interests?.keywords),
+    authors: normalizeInterestList(interests?.authors),
+  };
+}
+
+// 初始化设置，从共享服务端加载已保存的设置
+async function initSettings() {
+  await loadSharedInterests();
+  renderInterests();
+}
+
+async function loadSharedInterests() {
+  try {
+    const response = await fetch('/api/interests');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    sharedInterests = normalizeInterests(data);
+    interestsAvailable = true;
+  } catch (error) {
+    console.error('Failed to load shared interests:', error);
+    sharedInterests = { keywords: [], authors: [] };
+    interestsAvailable = false;
+    showNotification('Shared interests are unavailable. Start the site with python serve_local.py.', 'info');
+  }
+}
+
+function renderInterests() {
+  renderKeywordPreferences(sharedInterests.keywords);
+  renderAuthorPreferences(sharedInterests.authors);
+}
+
+// 渲染关键词偏好
+function renderKeywordPreferences(keywords = []) {
   const selectedKeywordsContainer = document.getElementById('selectedKeywords');
   selectedKeywordsContainer.innerHTML = '';
-  
-  // 获取保存的关键词，如果没有则使用默认关键词
-  let savedKeywords = localStorage.getItem('preferredKeywords');
-  let keywords = []; // 默认无关键词
-  
-  if (savedKeywords) {
-    try {
-      keywords = JSON.parse(savedKeywords);
-    } catch (e) {
-      console.error('解析保存的关键词失败:', e);
-    }
-  }
-  
+
   // 显示保存的关键词
   if (keywords.length > 0) {
     keywords.forEach(keyword => {
@@ -40,23 +86,11 @@ function loadKeywordPreferences() {
   }
 }
 
-// 从localStorage加载作者偏好
-function loadAuthorPreferences() {
+// 渲染作者偏好
+function renderAuthorPreferences(authors = []) {
   const selectedAuthorsContainer = document.getElementById('selectedAuthors');
   selectedAuthorsContainer.innerHTML = '';
-  
-  // 获取保存的作者，如果没有则为空数组
-  let savedAuthors = localStorage.getItem('preferredAuthors');
-  let authors = []; // 默认无作者
-  
-  if (savedAuthors) {
-    try {
-      authors = JSON.parse(savedAuthors);
-    } catch (e) {
-      console.error('解析保存的作者失败:', e);
-    }
-  }
-  
+
   // 显示保存的作者
   if (authors.length > 0) {
     authors.forEach(author => {
@@ -146,6 +180,7 @@ function addKeywordTag(keyword) {
       if (selectedKeywordsContainer.querySelectorAll('.category-button').length === 0) {
         showEmptyTagMessage();
       }
+      saveSettings({ quiet: true });
     }, 300);
   });
   
@@ -199,6 +234,7 @@ function addAuthorTag(author) {
       if (selectedAuthorsContainer.querySelectorAll('.category-button').length === 0) {
         showEmptyAuthorMessage();
       }
+      saveSettings({ quiet: true });
     }, 300);
   });
   
@@ -227,6 +263,7 @@ function initEventListeners() {
         addKeywordTag(keyword);
       }
       keywordInput.value = '';
+      saveSettings({ quiet: true });
     }
   });
 
@@ -246,6 +283,7 @@ function initEventListeners() {
           addKeywordTag(keyword);
         }
         keywordInput.value = '';
+        saveSettings({ quiet: true });
       }
     }
   });
@@ -265,6 +303,7 @@ function initEventListeners() {
         addAuthorTag(author);
       }
       authorInput.value = '';
+      saveSettings({ quiet: true });
     }
   });
 
@@ -284,6 +323,7 @@ function initEventListeners() {
           addAuthorTag(author);
         }
         authorInput.value = '';
+        saveSettings({ quiet: true });
       }
     }
   });
@@ -295,10 +335,6 @@ function initEventListeners() {
   // 作者复制按钮
   const copyAuthorsButton = document.getElementById('copyAuthors');
   copyAuthorsButton.addEventListener('click', copyAuthors);
-
-  // 保存设置按钮
-  const saveSettingsButton = document.getElementById('saveSettings');
-  saveSettingsButton.addEventListener('click', saveSettings);
 
   // 重置设置按钮
   const resetSettingsButton = document.getElementById('resetSettings');
@@ -375,8 +411,7 @@ function fallbackCopyText(text, successMessage) {
   document.body.removeChild(textArea);
 }
 
-// 保存设置
-function saveSettings() {
+function collectCurrentInterests() {
   // 获取所有选中的关键词
   const keywordTags = document.getElementById('selectedKeywords').querySelectorAll('.category-button');
   const keywords = [];
@@ -392,13 +427,41 @@ function saveSettings() {
     const authorName = tag.textContent.trim().replace('×', '').trim();
     authors.push(authorName);
   });
-  
-  // 保存设置到localStorage
-  localStorage.setItem('preferredKeywords', JSON.stringify(keywords));
-  localStorage.setItem('preferredAuthors', JSON.stringify(authors));
-  
-  // 显示保存成功提示，添加成功图标
-  showNotification('Settings saved successfully!', 'success');
+
+  return normalizeInterests({ keywords, authors });
+}
+
+// 保存设置
+async function saveSettings(options = {}) {
+  if (!interestsAvailable) {
+    showNotification('Shared interests are unavailable. Start the site with python serve_local.py.', 'info');
+    return;
+  }
+
+  const nextInterests = collectCurrentInterests();
+  try {
+    const response = await fetch('/api/interests', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(nextInterests),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const savedInterests = await response.json();
+    sharedInterests = normalizeInterests(savedInterests);
+    renderInterests();
+    if (!options.quiet) {
+      showNotification('Shared interests saved!', 'success');
+    }
+  } catch (error) {
+    console.error('Failed to save shared interests:', error);
+    showNotification('Failed to save shared interests.', 'info');
+  }
 }
 
 // 重置设置
@@ -416,6 +479,7 @@ function resetSettings() {
   showEmptyAuthorMessage();
   
   // 显示重置成功提示
+  saveSettings({ quiet: true });
   showNotification('Settings reset to default!', 'info');
 }
 

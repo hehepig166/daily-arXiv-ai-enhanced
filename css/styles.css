@@ -585,6 +585,12 @@ header {
   box-shadow: 0 2px 8px rgba(167, 139, 250, 0.25);
 }
 
+.disabled-interest-tag {
+  cursor: default;
+  opacity: 0.65;
+  border: 1px dashed var(--border-accent);
+}
+
 .keyword-tag.active {
   background: var(--gradient-primary);
   color: white;
@@ -1822,9 +1828,6 @@ footer {
   text-transform: none;
 }
 
-  padding-left: 3px; /* 减少左侧内边距 */
-}
-
 
 .author-tag {
   display: inline-flex;
@@ -2429,10 +2432,6 @@ footer {
   /* background-color: #fff8c5;  Removed yellow background */
   border-color: rgba(27, 31, 36, 0.15);
   color: #24292f;
-}
-
-.github-link.outdated-repo {
-  /* opacity: 0.7; Removed opacity */
 }
 
 .github-stars {

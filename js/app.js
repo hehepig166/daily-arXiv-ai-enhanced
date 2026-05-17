@@ -22,6 +22,7 @@ let annotations = {}; // paper id -> { read: [], favorite: [] }
 let annotationsAvailable = true;
 let currentAnnotationName = '';
 let annotationFilter = 'all';
+let interestsAvailable = true;
 
 function getEffectiveAnnotationName() {
   const trimmed = currentAnnotationName.trim();
@@ -193,46 +194,52 @@ async function togglePaperAnnotation(paper, type) {
   }
 }
 
-// 加载用户的关键词设置
-function loadUserKeywords() {
-  const savedKeywords = localStorage.getItem('preferredKeywords');
-  if (savedKeywords) {
-    try {
-      userKeywords = JSON.parse(savedKeywords);
-      // 默认激活所有关键词
-      activeKeywords = [...userKeywords];
-    } catch (error) {
-      console.error('解析关键词失败:', error);
-      userKeywords = [];
-      activeKeywords = [];
-    }
-  } else {
-    userKeywords = [];
-    activeKeywords = [];
+function normalizeInterestList(items) {
+  if (!Array.isArray(items)) {
+    return [];
   }
-  
-  // renderKeywordTags();
-  renderFilterTags();
+
+  const result = [];
+  const seen = new Set();
+  items.forEach(item => {
+    if (typeof item !== 'string') {
+      return;
+    }
+    const normalized = item.trim();
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(normalized);
+  });
+  return result;
 }
 
-// 加载用户的作者设置
-function loadUserAuthors() {
-  const savedAuthors = localStorage.getItem('preferredAuthors');
-  if (savedAuthors) {
-    try {
-      userAuthors = JSON.parse(savedAuthors);
-      // 默认激活所有作者
-      activeAuthors = [...userAuthors];
-    } catch (error) {
-      console.error('解析作者失败:', error);
-      userAuthors = [];
-      activeAuthors = [];
+async function fetchSharedInterests() {
+  try {
+    const response = await fetch('/api/interests');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
-  } else {
+    const data = await response.json();
+    userKeywords = normalizeInterestList(data.keywords);
+    activeKeywords = [...userKeywords];
+    userAuthors = normalizeInterestList(data.authors);
+    activeAuthors = [...userAuthors];
+    interestsAvailable = true;
+  } catch (error) {
+    console.warn('Shared interests API unavailable:', error);
+    userKeywords = [];
+    activeKeywords = [];
     userAuthors = [];
     activeAuthors = [];
+    interestsAvailable = false;
   }
-  
+
   renderFilterTags();
 }
 
@@ -240,21 +247,28 @@ function loadUserAuthors() {
 function renderFilterTags() {
   const filterTagsElement = document.getElementById('filterTags');
   const filterContainer = document.querySelector('.filter-label-container');
+
+  if (!filterTagsElement || !filterContainer) {
+    return;
+  }
+
+  if (!interestsAvailable) {
+    filterContainer.style.display = 'flex';
+    filterTagsElement.style.display = 'flex';
+    filterTagsElement.innerHTML = '<span class="category-button disabled-interest-tag" title="Start the site with python serve_local.py">Shared interests unavailable</span>';
+    return;
+  }
   
   // 如果没有作者和关键词，仅隐藏标签区域，保留容器（以显示搜索按钮）
   if ((!userAuthors || userAuthors.length === 0) && (!userKeywords || userKeywords.length === 0)) {
     filterContainer.style.display = 'flex';
-    if (filterTagsElement) {
-      filterTagsElement.style.display = 'none';
-      filterTagsElement.innerHTML = '';
-    }
+    filterTagsElement.style.display = 'none';
+    filterTagsElement.innerHTML = '';
     return;
   }
   
   filterContainer.style.display = 'flex';
-  if (filterTagsElement) {
-    filterTagsElement.style.display = 'flex';
-  }
+  filterTagsElement.style.display = 'flex';
   filterTagsElement.innerHTML = '';
   
   // 先添加作者标签
@@ -547,19 +561,13 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchGitHubStats();
   loadAnnotationName();
 
-  // 加载用户关键词
-  loadUserKeywords();
-
-  // 加载用户作者
-  loadUserAuthors();
-
   // 解析URL中的category、json、author和keywords参数
   urlCategoryParam = getUrlCategory();
   urlJsonParam = getJsonParam();
   urlAuthorParam = getUrlAuthor();
   urlKeywordsParam = getUrlKeywords();
 
-  Promise.all([fetchAnnotations(), fetchAvailableDates()]).then(() => {
+  Promise.all([fetchAnnotations(), fetchSharedInterests(), fetchAvailableDates()]).then(() => {
     if (availableDates.length > 0) {
       loadPapersByDate(availableDates[0]);
     } else {

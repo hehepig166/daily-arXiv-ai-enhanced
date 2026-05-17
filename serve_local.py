@@ -17,21 +17,30 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
     """Serve local static files without aggressive browser caching."""
 
     annotations_lock = Lock()
+    interests_lock = Lock()
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self) -> None:
-        if urlparse(self.path).path == "/api/annotations":
+        path = urlparse(self.path).path
+        if path == "/api/annotations":
             self.send_json(self.read_annotations())
+            return
+        if path == "/api/interests":
+            self.send_json(self.read_interests())
             return
 
         super().do_GET()
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path == "/api/annotations/toggle":
+        path = urlparse(self.path).path
+        if path == "/api/annotations/toggle":
             self.handle_toggle_annotation()
+            return
+        if path == "/api/interests":
+            self.handle_update_interests()
             return
 
         self.send_json({"error": "Not found"}, status=404)
@@ -54,6 +63,66 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
 
     def annotations_path(self) -> Path:
         return Path("data/annotations.json")
+
+    def interests_path(self) -> Path:
+        return Path("data/interests.json")
+
+    def normalize_interests(self, value: object) -> dict:
+        if not isinstance(value, dict):
+            value = {}
+
+        def normalize_list(items: object) -> list[str]:
+            if not isinstance(items, list):
+                return []
+
+            result: list[str] = []
+            seen: set[str] = set()
+            for item in items:
+                if not isinstance(item, str):
+                    continue
+                normalized = item.strip()
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(normalized)
+            return result
+
+        return {
+            "keywords": normalize_list(value.get("keywords")),
+            "authors": normalize_list(value.get("authors")),
+        }
+
+    def read_interests(self) -> dict:
+        path = self.interests_path()
+        if not path.exists():
+            return {"keywords": [], "authors": []}
+
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {"keywords": [], "authors": []}
+
+        return self.normalize_interests(data)
+
+    def write_interests(self, interests: dict) -> None:
+        path = self.interests_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            delete=False,
+        ) as tmp:
+            json.dump(self.normalize_interests(interests), tmp, ensure_ascii=False, indent=2, sort_keys=True)
+            tmp.write("\n")
+            tmp_path = Path(tmp.name)
+
+        tmp_path.replace(path)
 
     def read_annotations(self) -> dict:
         path = self.annotations_path()
@@ -134,6 +203,19 @@ class LocalSiteHandler(SimpleHTTPRequestHandler):
                 "annotations": annotations,
             }
         )
+
+    def handle_update_interests(self) -> None:
+        try:
+            body = self.read_json_body()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_json({"error": "Invalid JSON body"}, status=400)
+            return
+
+        interests = self.normalize_interests(body)
+        with self.interests_lock:
+            self.write_interests(interests)
+
+        self.send_json(interests)
 
 
 def discover_lan_ips() -> list[str]:
