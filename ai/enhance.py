@@ -3,11 +3,9 @@ import json
 import sys
 import re
 import time
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict
-from queue import Queue
-from threading import Lock
-# INSERT_YOUR_CODE
+from typing import List, Dict, Optional, Set
 import requests
 
 import dotenv
@@ -21,19 +19,89 @@ from langchain.prompts import (
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
 )
+
+AI_DIR = Path(__file__).resolve().parent
+if str(AI_DIR) not in sys.path:
+    sys.path.insert(0, str(AI_DIR))
+
 from structure import Structure
 
-if os.path.exists('.env'):
+if (AI_DIR / ".env").exists():
+    dotenv.load_dotenv(AI_DIR / ".env")
+elif Path(".env").exists():
     dotenv.load_dotenv()
-template = open("template.txt", "r").read()
-system = open("system.txt", "r").read()
+
+DEFAULT_AI_FIELDS = {
+    "tldr": "Summary generation failed",
+    "motivation": "Motivation analysis unavailable",
+    "method": "Method extraction failed",
+    "result": "Result analysis unavailable",
+    "conclusion": "Conclusion extraction failed",
+}
 
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, required=True, help="jsonline data file")
     parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers")
+    parser.add_argument("--append", action="store_true", help="Append to the enhanced jsonl and skip completed ids")
     return parser.parse_args()
+
+def get_target_file(data_file: str, language: str) -> str:
+    """Return the AI-enhanced output path for a source jsonl file."""
+    return data_file.replace(".jsonl", f"_AI_enhanced_{language}.jsonl")
+
+def load_jsonl(file_path: str) -> List[Dict]:
+    data = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                data.append(json.loads(line))
+    return data
+
+def load_ids(file_path: str) -> Set[str]:
+    if not os.path.exists(file_path):
+        return set()
+
+    ids = set()
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as e:
+                print(f"Skipping invalid JSON line in {file_path}: {e}", file=sys.stderr)
+                continue
+            paper_id = item.get("id")
+            if paper_id:
+                ids.add(paper_id)
+    return ids
+
+def deduplicate_items(data: List[Dict], skip_ids: Optional[Set[str]] = None) -> List[Dict]:
+    seen_ids = set(skip_ids or set())
+    unique_data = []
+    for item in data:
+        paper_id = item.get("id")
+        if not paper_id or paper_id in seen_ids:
+            continue
+        seen_ids.add(paper_id)
+        unique_data.append(item)
+    return unique_data
+
+def build_chain(model_name: str):
+    template = (AI_DIR / "template.txt").read_text(encoding="utf-8")
+    system = (AI_DIR / "system.txt").read_text(encoding="utf-8")
+
+    llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
+    print("Connect to:", model_name, file=sys.stderr)
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template(system),
+        HumanMessagePromptTemplate.from_template(template=template)
+    ])
+
+    return prompt_template | llm
 
 def process_single_item(chain, item: Dict, language: str) -> Dict:
     def is_sensitive(content: str) -> bool:
@@ -148,15 +216,6 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         item.update(code_info)
 
     """处理单个数据项"""
-    # Default structure with meaningful fallback values
-    default_ai_fields = {
-        "tldr": "Summary generation failed",
-        "motivation": "Motivation analysis unavailable",
-        "method": "Method extraction failed",
-        "result": "Result analysis unavailable",
-        "conclusion": "Conclusion extraction failed"
-    }
-    
     try:
         response: Structure = chain.invoke({
             "language": language,
@@ -180,17 +239,17 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
                 print(f"Failed to parse JSON for {item.get('id', 'unknown')}: {json_e}", file=sys.stderr)
         
         # Merge partial data with defaults to ensure all fields exist
-        item['AI'] = {**default_ai_fields, **partial_data}
+        item['AI'] = {**DEFAULT_AI_FIELDS, **partial_data}
         print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
     except Exception as e:
         # Catch any other exceptions and provide default values
         print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
-        item['AI'] = default_ai_fields
+        item['AI'] = DEFAULT_AI_FIELDS.copy()
     
     # Final validation to ensure all required fields exist
-    for field in default_ai_fields.keys():
+    for field in DEFAULT_AI_FIELDS.keys():
         if field not in item['AI']:
-            item['AI'][field] = default_ai_fields[field]
+            item['AI'][field] = DEFAULT_AI_FIELDS[field]
 
     # 检查 AI 生成的所有字段
     for v in item.get("AI", {}).values():
@@ -200,15 +259,10 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
-    llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
-    print('Connect to:', model_name, file=sys.stderr)
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        SystemMessagePromptTemplate.from_template(system),
-        HumanMessagePromptTemplate.from_template(template=template)
-    ])
+    if not data:
+        return []
 
-    chain = prompt_template | llm
+    chain = build_chain(model_name)
     
     # 使用线程池并行处理
     processed_data = [None] * len(data)  # 预分配结果列表
@@ -249,27 +303,23 @@ def main():
     language = os.environ.get("LANGUAGE", 'Chinese')
 
     # 检查并删除目标文件
-    target_file = args.data.replace('.jsonl', f'_AI_enhanced_{language}.jsonl')
-    if os.path.exists(target_file):
+    target_file = get_target_file(args.data, language)
+    if os.path.exists(target_file) and not args.append:
         os.remove(target_file)
         print(f'Removed existing file: {target_file}', file=sys.stderr)
 
     # 读取数据
-    data = []
-    with open(args.data, "r") as f:
-        for line in f:
-            data.append(json.loads(line))
+    data = load_jsonl(args.data)
 
     # 去重
-    seen_ids = set()
-    unique_data = []
-    for item in data:
-        if item['id'] not in seen_ids:
-            seen_ids.add(item['id'])
-            unique_data.append(item)
-
-    data = unique_data
+    completed_ids = load_ids(target_file) if args.append else set()
+    data = deduplicate_items(data, completed_ids)
     print('Open:', args.data, file=sys.stderr)
+    if completed_ids:
+        print(f"Skipping {len(completed_ids)} completed items from {target_file}", file=sys.stderr)
+    if not data:
+        print("No new items to process", file=sys.stderr)
+        return
     
     # 并行处理所有数据
     processed_data = process_all_items(
@@ -280,10 +330,11 @@ def main():
     )
     
     # 保存结果
-    with open(target_file, "w") as f:
+    write_mode = "a" if args.append else "w"
+    with open(target_file, write_mode, encoding="utf-8") as f:
         for item in processed_data:
             if item is not None:
-                f.write(json.dumps(item) + "\n")
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 if __name__ == "__main__":
     main()

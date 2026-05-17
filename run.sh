@@ -123,67 +123,83 @@ today=$(date "+%Y-%m-%d")
 
 echo "本地测试：爬取 $today 的arXiv论文... / Local test: Crawling $today arXiv papers..."
 
-# 第一步：爬取数据 / Step 1: Crawl data
-echo "步骤1：开始爬取... / Step 1: Starting crawl..."
+# 第一步：流式爬取和持久化 / Step 1: Streaming crawl and persistence
+echo "步骤1：开始流式爬取... / Step 1: Starting streaming crawl..."
+echo "📝 已有文件会被复用并续跑，不会删除 / Existing files will be reused for resume, not deleted"
 
-# 检查今日文件是否已存在，如存在则删除 / Check if today's file exists, delete if found
-if [ -f "data/${today}.jsonl" ]; then
-    echo "🗑️ 发现今日文件已存在，正在删除重新生成... / Found existing today's file, deleting for fresh start..."
-    rm "data/${today}.jsonl"
-    echo "✅ 已删除现有文件：data/${today}.jsonl / Deleted existing file: data/${today}.jsonl"
-else
-    echo "📝 今日文件不存在，准备新建... / Today's file doesn't exist, ready to create new one..."
+done_file=".tmp/enhancer-${today}.done"
+enhancer_pid=""
+rm -f "$done_file"
+mkdir -p ".tmp"
+
+cleanup_enhancer() {
+    if [ -n "$enhancer_pid" ] && kill -0 "$enhancer_pid" 2>/dev/null; then
+        touch "$done_file"
+        wait "$enhancer_pid" || true
+    fi
+}
+trap cleanup_enhancer EXIT
+
+if [ "$PARTIAL_MODE" = "false" ]; then
+    echo "启动AI增强队列... / Starting AI enhancement queue..."
+    run_python "ai/watch_enhance.py" \
+        --data "data/${today}.jsonl" \
+        --done-file "$done_file" \
+        --max_workers "${ENHANCE_MAX_WORKERS:-1}" &
+    enhancer_pid=$!
 fi
 
 cd daily_arxiv
-run_python -m scrapy crawl arxiv -o "../data/${today}.jsonl"
-
-if [ ! -f "../data/${today}.jsonl" ]; then
-    echo "爬取失败，未生成数据文件 / Crawling failed, no data file generated"
-    exit 1
-fi
-
-# 第二步：检查去重 / Step 2: Check duplicates
-echo "步骤2：执行去重检查... / Step 2: Performing intelligent deduplication check..."
+export ARXIV_RUN_DATE="$today"
 set +e
-run_python daily_arxiv/check_stats.py
-dedup_exit_code=$?
+run_python -m scrapy crawl arxiv
+crawl_exit_code=$?
 set -e
-
-case $dedup_exit_code in
-    0)
-        # check_stats.py已输出成功信息，继续处理 / check_stats.py already output success info, continue processing
-        ;;
-    1)
-        # check_stats.py已输出无新内容信息，停止处理 / check_stats.py already output no new content info, stop processing
-        exit 1
-        ;;
-    2)
-        # check_stats.py已输出错误信息，停止处理 / check_stats.py already output error info, stop processing
-        exit 2
-        ;;
-    *)
-        echo "❌ 未知退出码，停止处理... / Unknown exit code, stopping..."
-        exit 1
-        ;;
-esac
 
 cd ..
 
-# 第三步：AI处理 / Step 3: AI processing
-if [ "$PARTIAL_MODE" = "false" ]; then
-    echo "Step 3: AI enhancement processing..."
-    cd ai
-    run_python enhance.py --data "../data/${today}.jsonl"
+touch "$done_file"
 
-    echo "AI enhancement processing completed"
-    cd ..
+if [ -n "$enhancer_pid" ]; then
+    echo "等待AI增强队列处理剩余论文... / Waiting for AI enhancement queue to drain..."
+    set +e
+    wait "$enhancer_pid"
+    enhancer_exit_code=$?
+    set -e
+    enhancer_pid=""
+else
+    enhancer_exit_code=0
+fi
+
+trap - EXIT
+
+if [ "$crawl_exit_code" -ne 0 ]; then
+    echo "爬取失败 / Crawling failed"
+    exit "$crawl_exit_code"
+fi
+
+if [ "$enhancer_exit_code" -ne 0 ]; then
+    echo "AI增强队列失败 / AI enhancement queue failed"
+    exit "$enhancer_exit_code"
+fi
+
+if [ ! -s "data/${today}.jsonl" ] && { [ "$PARTIAL_MODE" = "true" ] || [ ! -s "data/${today}_AI_enhanced_${LANGUAGE}.jsonl" ]; }; then
+    echo "未生成新的今日数据文件，可能没有新论文 / No new data file generated, possibly no new papers"
+    exit 1
+fi
+
+if [ "$PARTIAL_MODE" = "false" ]; then
+    if [ ! -s "data/${today}_AI_enhanced_${LANGUAGE}.jsonl" ]; then
+        echo "AI增强文件为空或不存在，可能没有新论文 / AI enhanced file is empty or missing, possibly no new papers"
+        exit 1
+    fi
+    echo "AI enhancement streaming completed"
 else
     echo "Skipping AI processing (partial mode)"
 fi
 
-# 第四步：转换为Markdown / Step 4: Convert to Markdown
-echo "Step 4: Converting to Markdown..."
+# 第二步：转换为Markdown / Step 2: Convert to Markdown
+echo "Step 2: Converting to Markdown..."
 cd to_md
 
 if [ "$PARTIAL_MODE" = "false" ] && [ -f "../data/${today}_AI_enhanced_${LANGUAGE}.jsonl" ]; then
@@ -202,8 +218,8 @@ fi
 
 cd ..
 
-# 第五步：更新文件列表 / Step 5: Update file list
-echo "步骤5：更新文件列表... / Step 5: Updating file list..."
+# 第三步：更新文件列表 / Step 3: Update file list
+echo "步骤3：更新文件列表... / Step 3: Updating file list..."
 shopt -s nullglob
 jsonl_files=(data/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*.jsonl)
 if [ ${#jsonl_files[@]} -eq 0 ]; then
@@ -220,15 +236,15 @@ echo ""
 echo "=== 本地调试完成 / Local Debug Completed ==="
 if [ "$PARTIAL_MODE" = "false" ]; then
     echo "🎉 完整流程已完成 / Complete workflow finished:"
-    echo "   ✅ 数据爬取 / Data crawling"
-    echo "   ✅ 去重检查 / Smart duplicate check"
-    echo "   ✅ AI增强处理 / AI enhancement"
+    echo "   ✅ 流式数据爬取 / Streaming data crawling"
+    echo "   ✅ 续跑去重 / Resume-aware deduplication"
+    echo "   ✅ 流式AI增强 / Streaming AI enhancement"
     echo "   ✅ Markdown转换 / Markdown conversion"
     echo "   ✅ 文件列表更新 / File list update"
 else
     echo "🔄 部分流程已完成 / Partial workflow finished:"
-    echo "   ✅ 数据爬取 / Data crawling"
-    echo "   ✅ 去重检查 / Smart duplicate check"
+    echo "   ✅ 流式数据爬取 / Streaming data crawling"
+    echo "   ✅ 续跑去重 / Resume-aware deduplication"
     echo "   ⏭️  跳过AI增强和Markdown转换 / Skipped AI enhancement and Markdown conversion"
     echo "   ✅ 文件列表更新 / File list update"
     echo ""
