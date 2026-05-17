@@ -35,6 +35,9 @@ jobs:
         export CATEGORIES="${{ vars.CATEGORIES }}"
         export MODEL_NAME="${{ vars.MODEL_NAME }}"
         export ARXIV_RUN_DATE="$today"
+        export PYTHONIOENCODING="utf-8"
+        export LANG="${LANG:-C.UTF-8}"
+        export LC_ALL="${LC_ALL:-$LANG}"
 
         done_file=".tmp/enhancer-${today}.done"
         rm -f "$done_file"

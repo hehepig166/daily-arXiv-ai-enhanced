@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-$LANG}"
+
 # 本地测试脚本 / Local testing script
 # 主要工作流已迁移到 GitHub Actions (.github/workflows/run.yml)
 # Main workflow has been migrated to GitHub Actions (.github/workflows/run.yml)
